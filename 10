@@ -1,0 +1,245 @@
+-- VR Torso Menu Script (Fixed Laser Direction + Localized Track Input)
+-- Place in StarterPlayerScripts or StarterCharacterScripts
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Torso Menu UI References
+local torsoMenuPart = nil
+local torsoMenuGui = nil
+
+-- Slider UI Elements
+local sliderTrack = nil
+local sliderThumb = nil
+
+-- Laser Pointer Components
+local laserBeam = nil
+local laserDot = nil
+local rightArmInstance = nil
+local laserConnection = nil
+
+-- Interaction States
+local isMenuVisible = false
+local isDragging = false
+
+-- --- LOCALIZED TRACK SLIDER LOGIC ---
+local function updateSliderPosition(localX)
+	if not sliderTrack or not sliderThumb then return end
+	
+	-- localX is the precise pixel position relative to the track frame itself
+	local trackWidth = sliderTrack.AbsoluteSize.X
+	
+	-- Calculate percentage across the track (0 to 1)
+	local relativeX = localX / trackWidth
+	relativeX = math.clamp(relativeX, 0, 1)
+	
+	-- Map 0-1 to 12 (Day) -> 24 (Night)
+	local rawHour = 12 + (relativeX * 12)
+	local targetHour = math.floor(rawHour + 0.5) -- Discrete increments of 1 unit
+	
+	Lighting.ClockTime = targetHour
+	
+	-- Snap thumb position visually based on the set hour
+	local snappedRelativeX = (targetHour - 12) / 12
+	sliderThumb.Position = UDim2.new(snappedRelativeX, 0, 0.5, 0)
+end
+
+-- --- VISUAL LASER POINTER UPDATER ---
+local function updateLaserPointer()
+	if not isMenuVisible or not rightArmInstance or not laserBeam or not laserDot then 
+		if laserBeam then laserBeam.Transparency = 1 end
+		if laserDot then laserDot.Transparency = 1 end
+		return 
+	end
+
+	local startPos = rightArmInstance.Position
+	-- Fixed downward orientation for R15/R6 hands pointing forward
+	local direction = -rightArmInstance.CFrame.UpVector
+	local maxDistance = 25
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {player.Character}
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local raycastResult = workspace:Raycast(startPos, direction * maxDistance, raycastParams)
+	local targetPos = startPos + (direction * maxDistance)
+
+	if raycastResult then
+		targetPos = raycastResult.Position
+	end
+
+	-- Visual Update
+	local distance = (targetPos - startPos).Magnitude
+	laserBeam.Size = Vector3.new(0.025, 0.025, distance)
+	laserBeam.CFrame = CFrame.lookAt(startPos, targetPos) * CFrame.new(0, 0, -distance / 2)
+	laserBeam.Transparency = 0.59
+
+	laserDot.CFrame = CFrame.new(targetPos)
+	laserDot.Transparency = 0
+end
+
+-- --- PHYSICAL TORSO MENU & LASER CREATION ---
+local function setupTorsoMenu(character)
+	if torsoMenuPart then torsoMenuPart:Destroy() end
+	if laserBeam then laserBeam:Destroy() end
+	if laserDot then laserDot:Destroy() end
+	if laserConnection then laserConnection:Disconnect() end
+	
+	isMenuVisible = false
+	isDragging = false
+
+	local torso = character:WaitForChild("UpperTorso", 0.1) or character:WaitForChild("Torso", 0.1)
+	local rightArm = character:WaitForChild("RightHand", 0.1) or character:WaitForChild("Right Arm", 0.1)
+	if not torso or not rightArm then return end
+	
+	rightArmInstance = rightArm
+
+	-- Create Torso Anchor Part
+	torsoMenuPart = Instance.new("Part")
+	torsoMenuPart.Name = "VRTorsoMenuPart"
+	torsoMenuPart.Size = Vector3.new(1.6, 0.5, 0.1) 
+	torsoMenuPart.Transparency = 1
+	torsoMenuPart.Massless = true
+	torsoMenuPart.CanCollide = false
+	torsoMenuPart.CanQuery = false
+	torsoMenuPart.CanTouch = false
+	torsoMenuPart.Parent = character
+	
+	local weld = Instance.new("Weld")
+	weld.Part0 = torso
+	weld.Part1 = torsoMenuPart
+	weld.C0 = CFrame.new(-2, -0.045, -6.1) 
+	weld.Parent = torsoMenuPart
+	
+	-- Visual Laser Elements
+	laserBeam = Instance.new("Part")
+	laserBeam.Name = "VRPointerBeam"
+	laserBeam.Material = Enum.Material.Neon
+	laserBeam.Color = Color3.fromRGB(188, 156, 105)
+	laserBeam.CanCollide = false
+	laserBeam.CanQuery = false
+	laserBeam.CanTouch = false
+	laserBeam.Anchored = true
+	laserBeam.Transparency = 1
+	laserBeam.Parent = character
+
+	laserDot = Instance.new("Part")
+	laserDot.Name = "VRPointerDot"
+	laserDot.Shape = Enum.PartType.Ball
+	laserDot.Size = Vector3.new(0.06, 0.06, 0.06)
+	laserDot.Material = Enum.Material.Neon
+	laserDot.Color = Color3.fromRGB(255, 121, 3)
+	laserDot.CanCollide = false
+	laserDot.CanQuery = false
+	laserDot.CanTouch = false
+	laserDot.Anchored = true
+	laserDot.Transparency = 1
+	laserDot.Parent = character
+
+	-- UI Construction
+	torsoMenuGui = Instance.new("SurfaceGui")
+	torsoMenuGui.Name = "VRTorsoMenuGui"
+	torsoMenuGui.Face = Enum.NormalId.Back 
+	torsoMenuGui.AlwaysOnTop = true
+	torsoMenuGui.ResetOnSpawn = false
+	torsoMenuGui.CanvasSize = Vector2.new(400, 150) 
+	torsoMenuGui.Enabled = false
+	torsoMenuGui.Adornee = torsoMenuPart 
+	torsoMenuGui.Parent = playerGui 
+	
+	sliderTrack = Instance.new("Frame")
+	sliderTrack.Size = UDim2.new(0.85, 0, 0.15, 0)
+	sliderTrack.Position = UDim2.new(0.075, 0, 0.425, 0)
+	sliderTrack.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+	sliderTrack.BorderSizePixel = 0
+	sliderTrack.Parent = torsoMenuGui
+	
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(1, 0)
+	trackCorner.Parent = sliderTrack
+
+	local leftLabel = Instance.new("TextLabel")
+	leftLabel.Size = UDim2.new(0.3, 0, 0.3, 0)
+	leftLabel.Position = UDim2.new(0.075, 0, 0.1, 0)
+	leftLabel.BackgroundTransparency = 1
+	leftLabel.Text = "DAY"
+	leftLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+	leftLabel.TextXAlignment = Enum.TextXAlignment.Left
+	leftLabel.Font = Enum.Font.SourceSansBold
+	leftLabel.TextSize = 24
+	leftLabel.Parent = torsoMenuGui
+
+	local rightLabel = Instance.new("TextLabel")
+	rightLabel.Size = UDim2.new(0.3, 0, 0.3, 0)
+	rightLabel.Position = UDim2.new(0.625, 0, 0.1, 0)
+	rightLabel.BackgroundTransparency = 1
+	rightLabel.Text = "NIGHT"
+	rightLabel.TextColor3 = Color3.fromRGB(120, 150, 255)
+	rightLabel.TextXAlignment = Enum.TextXAlignment.Right
+	rightLabel.Font = Enum.Font.SourceSansBold
+	rightLabel.TextSize = 24
+	rightLabel.Parent = torsoMenuGui
+	
+	sliderThumb = Instance.new("TextButton")
+	sliderThumb.Size = UDim2.new(0, 40, 0, 40)
+	sliderThumb.AnchorPoint = Vector2.new(0.5, 0.5)
+	sliderThumb.Position = UDim2.new(0, 0, 0.5, 0)
+	sliderThumb.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+	sliderThumb.Text = ""
+	sliderThumb.Parent = sliderTrack
+	
+	local thumbCorner = Instance.new("UICorner")
+	thumbCorner.CornerRadius = UDim.new(1, 0)
+	thumbCorner.Parent = sliderThumb
+	
+	-- Track interactions locally instead of globally via UserInputService
+	sliderThumb.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isDragging = true
+		end
+	end)
+
+	sliderThumb.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isDragging = false
+		end
+	end)
+
+	-- Updates position using local UI pixel coordinates relative to the track
+	sliderTrack.MouseMoved:Connect(function(x, y)
+		if isDragging then
+			updateSliderPosition(x)
+		end
+	end)
+
+	laserConnection = RunService.RenderStepped:Connect(updateLaserPointer)
+end
+
+player.CharacterAdded:Connect(setupTorsoMenu)
+if player.Character then
+	setupTorsoMenu(player.Character)
+end
+
+-- --- PANEL TOGGLE CONTROL ---
+UserInputService.InputBegan:Connect(function(input, processed)
+	if input.KeyCode == Enum.KeyCode.ButtonL3 then
+		if torsoMenuGui and torsoMenuPart then
+			isMenuVisible = not isMenuVisible
+			torsoMenuGui.Enabled = isMenuVisible
+			
+			if isMenuVisible then
+				torsoMenuPart.Transparency = 0.5
+			else
+				torsoMenuPart.Transparency = 1
+				isDragging = false
+				if laserBeam then laserBeam.Transparency = 1 end
+				if laserDot then laserDot.Transparency = 1 end
+			end
+		end
+	end
+end)
