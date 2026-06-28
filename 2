@@ -1,0 +1,176 @@
+local InsertService = game:GetService("InsertService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local ASSET_ID = 123944671252238
+
+-- ==========================================================
+-- ADJUST YOUR OFFSETS HERE (In Studs)
+-- ==========================================================
+local OFFSET_FORWARD = -70  -- Distance in front of your chest
+local OFFSET_UP      = -4.75  -- Height adjustments
+local OFFSET_RIGHT   = -21  -- Side-to-side adjustments
+-- ==========================================================
+
+local player = Players.LocalPlayer
+if not player then 
+    warn("Please ensure you are in 'Play' mode in Studio.") 
+    return 
+end
+
+-- Global variable tracking the active menu instance
+local currentMenuModel = nil
+local isMenuVisible = true
+
+-- Helper function to reposition the menu in front of the torso
+local function repositionMenu()
+    if not currentMenuModel or not player.Character then return end
+    
+    local torso = player.Character:FindFirstChild("Torso") or player.Character:FindFirstChild("UpperTorso")
+    if not torso then return end
+    
+    local torsoCFrame = torso.CFrame
+    local targetCFrame = torsoCFrame * CFrame.new(OFFSET_RIGHT, OFFSET_UP, -OFFSET_FORWARD)
+    local rotatedCFrame = targetCFrame * CFrame.Angles(0, math.rad(0), 0)
+
+    currentMenuModel:PivotTo(rotatedCFrame)
+end
+
+-- Core function to build and configure the panel
+local function setupMenu(character)
+    if not character then return end
+    
+    -- Target the physical torso element (R6 Torso / R15 UpperTorso)
+    local torso = character:WaitForChild("Torso", 5) or character:WaitForChild("UpperTorso", 5)
+    if not torso then
+        warn("Could not target a Torso or UpperTorso on your character model.")
+        return
+    end
+
+    -- Clean up any lingering or dead menus from a previous life
+    if currentMenuModel then currentMenuModel:Destroy() end
+    local existingMenu = Workspace:FindFirstChild("VR_CustomMenu_" .. tostring(ASSET_ID))
+    if existingMenu then existingMenu:Destroy() end
+
+    -- Import a fresh copy of the asset locally
+    local success, result = pcall(function()
+        return game:GetObjects("rbxassetid://" .. tostring(ASSET_ID))
+    end)
+
+    if not (success and result and #result > 0) then
+        warn("Failed to import asset. Error: " .. tostring(result))
+        return
+    end
+
+    local customModel = result[1]
+    if not customModel or not customModel:IsA("Model") then
+        warn("The loaded asset root must be a Model format.")
+        return
+    end
+
+    customModel.Name = "VR_CustomMenu_" .. tostring(ASSET_ID)
+    currentMenuModel = customModel
+
+    -- Establish a clean primary root assembly anchor point
+    local primaryAnchor = customModel.PrimaryPart or customModel:FindFirstChildWhichIsA("BasePart")
+    if not primaryAnchor then
+        primaryAnchor = Instance.new("Part")
+        primaryAnchor.Name = "MenuAnchorProxy"
+        primaryAnchor.Size = Vector3.new(1, 1, 1)
+        primaryAnchor.Transparency = 1
+        primaryAnchor.Parent = customModel
+        customModel.PrimaryPart = primaryAnchor
+    end
+
+    -- Configure internal properties and ensure elements are ANCHORED so they stay in place
+    for _, desc in ipairs(customModel:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            desc.CanCollide = false
+            desc.CanTouch = false
+            desc.CanQuery = false
+            desc.Massless = true
+            desc.Anchored = true -- Keep anchored so it doesn't fall when un-welded
+        end
+    end
+
+    -- Sync current hidden state visibility to the newly spawned panel
+    for _, obj in ipairs(customModel:GetDescendants()) do
+        if obj:IsA("BasePart") or obj:IsA("Decal") or obj:IsA("Texture") then
+            if not obj:GetAttribute("OriginalTransparency") then
+                obj:SetAttribute("OriginalTransparency", obj.Transparency)
+            end
+            obj.Transparency = isMenuVisible and obj:GetAttribute("OriginalTransparency") or 1
+        elseif obj:IsA("Beam") then
+            if not obj:GetAttribute("OriginalEnabled") then
+                obj:SetAttribute("OriginalEnabled", obj.Enabled)
+            end
+            obj.Enabled = isMenuVisible and obj:GetAttribute("OriginalEnabled") or false
+        elseif obj:IsA("GuiObject") then
+            obj.Visible = isMenuVisible
+        elseif obj:IsA("LayerCollector") or obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") or obj:IsA("ParticleEmitter") then
+            obj.Enabled = isMenuVisible
+        end
+    end
+
+    customModel.Parent = Workspace
+
+    -- Initial positional placement relative to Torso
+    repositionMenu()
+
+    print("Panel successfully spawned and anchored at your Torso's position.")
+end
+
+-- Clean up any older event loops running in the environment
+if _G.VRMenuConnection then _G.VRMenuConnection:Disconnect() end
+if _G.VRCharacterConnection then _G.VRCharacterConnection:Disconnect() end
+
+-- 1. Setup automatic track listener for when your character dies and respawns
+_G.VRCharacterConnection = player.CharacterAdded:Connect(setupMenu)
+
+-- Run right now on your currently living character if you are already spawned in
+if player.Character then
+    task.spawn(setupMenu, player.Character)
+end
+
+-- 2. VR Controller Interaction Listener (Right Joystick Click)
+local TOGGLE_KEY = Enum.KeyCode.ButtonX
+
+_G.VRMenuConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == TOGGLE_KEY then
+        if not currentMenuModel or not currentMenuModel.Parent then return end
+        isMenuVisible = not isMenuVisible
+        
+        -- NEW: If we are making the menu visible, update its position to the player's torso before showing it
+        if isMenuVisible then
+            repositionMenu()
+        end
+        
+        for _, obj in ipairs(currentMenuModel:GetDescendants()) do
+            -- Parts and Decals
+            if obj:IsA("BasePart") or obj:IsA("Decal") or obj:IsA("Texture") then
+                if not obj:GetAttribute("OriginalTransparency") then
+                    obj:SetAttribute("OriginalTransparency", obj.Transparency)
+                end
+                obj.Transparency = isMenuVisible and obj:GetAttribute("OriginalTransparency") or 1
+                
+            -- Beams support
+            elseif obj:IsA("Beam") then
+                if not obj:GetAttribute("OriginalEnabled") then
+                    obj:SetAttribute("OriginalEnabled", obj.Enabled)
+                end
+                obj.Enabled = isMenuVisible and obj:GetAttribute("OriginalEnabled") or false
+                
+            -- UI elements
+            elseif obj:IsA("GuiObject") then
+                obj.Visible = isMenuVisible
+            elseif obj:IsA("LayerCollector") or obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") or obj:IsA("ParticleEmitter") then
+                obj.Enabled = isMenuVisible
+            end
+        end
+        
+        print("Menu visibility toggled. Status: ", isMenuVisible and "ON" or "OFF")
+    end
+end)
+
+print("VR tracking active. Click your Right Thumbstick down to hide/show and reposition the static panel.")
