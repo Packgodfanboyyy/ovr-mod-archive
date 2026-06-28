@@ -6,25 +6,25 @@ local Scripts = {
 
  {Name = "OVRs Mod Weapon/Item Spawner", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/3"},
 
- {Name = "LoadCustomMap", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/LoadCustomOVRModMap/refs/heads/main/qwe"},
+ {Name = "LoadCustomMap", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/4"},
 
- {Name = "NotifierButtons", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/NotifierVisibilityFix/refs/heads/main/qwe"},
+ {Name = "NotifierButtons", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/5"},
 
- {Name = "GmodPhysicsTogglePatch1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/PhysicsVisibilityFix/refs/heads/main/qwe"},
+ {Name = "GmodPhysicsTogglePatch1", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/6"},
 
- {Name = "GmodResizerTogglePatch1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/ResizerVisibilityFix/refs/heads/main/qwe"},
+ {Name = "GmodResizerTogglePatch1", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/7"},
 
- {Name = "ConstraintsFix5Patch1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/ConstrainerVisibilityFix/refs/heads/main/qwe"},
+ {Name = "ConstraintsFix5Patch1", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/8"},
 
- {Name = "TimefreezeFix4", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/TimefreezeToggleableFix4/refs/heads/main/qwe"},
+ {Name = "TimefreezeFix4", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/9"},
 
- {Name = "Time Changer", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/TimeChangerSliderAndLaserPointer/refs/heads/main/qwe"},
+ {Name = "Time Changer", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/10"},
 
- {Name = "Bullet Trails", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/Custom-Bullet-Trails/refs/heads/main/qwe"},
+ {Name = "Bullet Trails", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/11"},
 
- {Name = "PartyMode1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/PartyMode1/refs/heads/main/qwe"},
+ {Name = "PartyMode1", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/12"},
 
- {Name = "PartyMode2", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/PartyMode2/refs/heads/main/qwe"},
+ {Name = "PartyMode2", URL = "https://raw.githubusercontent.com/Packgodfanboyyy/ovr-mod-archive/refs/heads/main/13"},
 
 }
 
