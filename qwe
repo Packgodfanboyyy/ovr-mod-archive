@@ -1,0 +1,47 @@
+local Scripts = {
+
+ {Name = "TitleMainMenuScreenRework1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/Title-Main-Menu-Screen-ReworkV1/refs/heads/main/qwe"},
+
+ {Name = "OVR/Mod Spawn Menu", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/SpawnMenuVisibilityFix/refs/heads/main/qwe"},
+
+ {Name = "OVRs Mod Weapon/Item Spawner", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/OVRs-Mod-Weapon-Loader-Fix2/refs/heads/main/qwe"},
+
+ {Name = "LoadCustomMap", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/LoadCustomOVRModMap/refs/heads/main/qwe"},
+
+ {Name = "NotifierButtons", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/NotifierVisibilityFix/refs/heads/main/qwe"},
+
+ {Name = "GmodPhysicsTogglePatch1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/PhysicsVisibilityFix/refs/heads/main/qwe"},
+
+ {Name = "GmodResizerTogglePatch1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/ResizerVisibilityFix/refs/heads/main/qwe"},
+
+ {Name = "ConstraintsFix5Patch1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/ConstrainerVisibilityFix/refs/heads/main/qwe"},
+
+ {Name = "TimefreezeFix4", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/TimefreezeToggleableFix4/refs/heads/main/qwe"},
+
+ {Name = "Time Changer", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/TimeChangerSliderAndLaserPointer/refs/heads/main/qwe"},
+
+ {Name = "Bullet Trails", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/Custom-Bullet-Trails/refs/heads/main/qwe"},
+
+ {Name = "PartyMode1", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/PartyMode1/refs/heads/main/qwe"},
+
+ {Name = "PartyMode2", URL = "https://raw.githubusercontent.com/Exploiterrobloxproeeeeeee/PartyMode2/refs/heads/main/qwe"},
+
+}
+
+
+
+-- Instantly run all scripts when executed
+
+for _, data in pairs(Scripts) do
+
+    task.spawn(function()
+
+        pcall(function()
+
+            loadstring(game:HttpGet(data.URL))()
+
+        end)
+
+    end)
+
+end
