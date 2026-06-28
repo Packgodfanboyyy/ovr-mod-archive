@@ -1,0 +1,268 @@
+-- VR Torso Menu with Strictly Ordered Categories and Grid Rows
+-- Place in StarterPlayerScripts or StarterCharacterScripts
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Remote Event Configuration
+local commandEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Command")
+
+-- --- CONFIGURABLE CATEGORIES & ITEMS TABLE ---
+-- FIXED: Corrected the missing bracket closures for Secret Pistols, Misc, and Foods!
+local MenuData = {
+    {
+        CategoryName = "Pistols",
+        Items = {"USP", "Glock 17", "Glock 18", "Beretta", "Five-seven", "P250", "M1911", "Classic M1911", "Desert Eagle", "Laser Pistol"}
+    },
+    {
+        CategoryName = "Revolvers",
+        Items = {"Raging Bull", "Cobra", "Python"}
+    },
+    {
+        CategoryName = "SMGs",
+        Items = {"MAC-10", "MP7A1", "UZI", "MP5", "UMP-45", "P90", "PPSH-41"}
+    },
+    {
+        CategoryName = "Rifles",
+        Items = {"M4A1", "MK18", "AK74", "AKM", "AS VAL", "SCAR-H", "G36K", "Honey Badger", "Galil", "G3A3", "Aug A3", "SCAR-H", "L85A2", "M14", "M1A1 Thompson", "M1 Garand", "Famas F1", "Laser Spitter"}
+    },
+    {
+        CategoryName = "Shotguns",
+        Items = {"M1014", "R870", "Model 1897", "SPAS-12", "KS-23M", "Saiga 12", "Super Shotgun", "DB Shotgun"}
+    },
+    {
+        CategoryName = "Snipers",
+        Items = {"M82 Barrett"}
+    },
+    {
+        CategoryName = "Attachments",
+        Items = {"Sniper Silencer", "Rifle Silencer", "SMG Rail Silencer", 
+            "Pistol Silencer", "Refined Pistol Silencer", "EOTech Sight", 
+            "Reflex Sight", "Grip Attachment", "Laser Attachment", "Flashlight Attachment"}
+    },
+    {
+        CategoryName = "Melees",
+        Items = {"Sword", "Katana", "Imperial Sword", "Knife", "Battle Axe", "Axe", "Hammer", "Crowbar", "Bonk", "Baton"}
+    },
+    {
+        CategoryName = "Secret Pistols",
+        Items = {
+            "Super Pistol", "Balloon Gun", "Explosive Pistol", "Health Pistol", 
+            "Nuke Pistol", "Streamliner", "Flight Pistol", "Super Accelerator", "Welder"}
+    },
+    {
+        CategoryName = "Misc",
+        Items = { "Impact Smiley", "Gnome", "Plushie", "Radio", "Detector", "Spray Can", "Credit", "Basketball", "Standard Pouch", "Tracer Pouch", "Shield", "OldShield", "RPG-7", "Unmounted LMG", "Grappler", "Pumpkin Launcher", "Candy Cane", "Man Mug", "Woman Mug", "Smiling Plate"}
+    },
+    {
+        CategoryName = "Foods",
+        Items = { "Cake", "Cheezburger", "Pizza", "Hotdog", "Apple", "Banana", "Candy"}
+    }
+}
+
+-- Torso Menu UI References
+local torsoMenuPart = nil
+local torsoMenuGui = nil
+
+-- --- PHYSICAL TORSO MENU CREATION ---
+local function setupTorsoMenu(character)
+    if torsoMenuPart then torsoMenuPart:Destroy() end
+    
+    local torso = character:WaitForChild("UpperTorso", 0.1) or character:WaitForChild("Torso", 0.1)
+    if not torso then return end
+    
+    -- Creating physical menu anchor part
+    torsoMenuPart = Instance.new("Part")
+    torsoMenuPart.Name = "VRTorsoMenuPart"
+    torsoMenuPart.Size = Vector3.new(2.2, 1.85, 0.1) 
+    torsoMenuPart.Transparency = 1
+    torsoMenuPart.Massless = true
+    torsoMenuPart.CanCollide = false
+    torsoMenuPart.CanQuery = false 
+    torsoMenuPart.CanTouch = false
+    torsoMenuPart.Parent = character
+    
+    local weld = Instance.new("Weld")
+    weld.Part0 = torso
+    weld.Part1 = torsoMenuPart
+    weld.C0 = CFrame.new(4.35, 0.985, -6.1)
+    weld.Parent = torsoMenuPart
+    
+    -- UI configuration
+    torsoMenuGui = Instance.new("SurfaceGui")
+    torsoMenuGui.Name = "VRTorsoMenuGui"
+    torsoMenuGui.Face = Enum.NormalId.Back 
+    torsoMenuGui.AlwaysOnTop = true
+    torsoMenuGui.ResetOnSpawn = false
+    torsoMenuGui.CanvasSize = Vector2.new(400, 300)
+    torsoMenuGui.Enabled = false
+    torsoMenuGui.Adornee = torsoMenuPart 
+    torsoMenuGui.Parent = playerGui 
+    
+    -- Background panel styling
+    local backgroundPanel = Instance.new("Frame")
+    backgroundPanel.Size = UDim2.new(1, 0, 1, 0)
+    backgroundPanel.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    backgroundPanel.BackgroundTransparency = 0.4
+    backgroundPanel.Parent = torsoMenuGui
+    
+    local panelCorner = Instance.new("UICorner")
+    panelCorner.CornerRadius = UDim.new(0, 16)
+    panelCorner.Parent = backgroundPanel
+
+    -- Navigation Header Frame
+    local headerFrame = Instance.new("Frame")
+    headerFrame.Size = UDim2.new(1, -20, 0, 40)
+    headerFrame.Position = UDim2.new(0, 10, 0, 10)
+    headerFrame.BackgroundTransparency = 1
+    headerFrame.Parent = backgroundPanel
+
+    -- Back Button
+    local backButton = Instance.new("TextButton")
+    backButton.Size = UDim2.new(0, 80, 1, 0)
+    backButton.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
+    backButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    backButton.Font = Enum.Font.Michroma
+    backButton.TextSize = 12
+    backButton.Text = "< Back"
+    backButton.Visible = false
+    backButton.Parent = headerFrame
+
+    local backCorner = Instance.new("UICorner")
+    backCorner.CornerRadius = UDim.new(0, 8)
+    backCorner.Parent = backButton
+
+    -- Title Label
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -90, 1, 0)
+    titleLabel.Position = UDim2.new(0, 90, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.Font = Enum.Font.Michroma
+    titleLabel.TextSize = 14
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Text = "Categories"
+    titleLabel.Parent = headerFrame
+    
+    -- Scrolling View Container
+    local scrollingFrame = Instance.new("ScrollingFrame")
+    scrollingFrame.Size = UDim2.new(1, -20, 1, -70)
+    scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
+    scrollingFrame.BackgroundTransparency = 1
+    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scrollingFrame.ScrollBarThickness = 6
+    scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 255, 255)
+    scrollingFrame.Parent = backgroundPanel
+    
+    local uiGridLayout = Instance.new("UIGridLayout")
+    uiGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    uiGridLayout.CellPadding = UDim2.new(0, 8, 0, 8)
+    uiGridLayout.CellSize = UDim2.new(0, 120, 0, 45) -- 3 buttons per row layout
+    uiGridLayout.Parent = scrollingFrame
+    
+    -- Links canvas size dynamically to items or categories present inside the grid
+    uiGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, uiGridLayout.AbsoluteContentSize.Y)
+    end)
+
+    -- --- VIEW GENERATOR FUNCTIONS ---
+    local function clearMenu()
+        for _, child in ipairs(scrollingFrame:GetChildren()) do
+            if child:IsA("TextButton") then
+                child:Destroy()
+            end
+        end
+    end
+
+    local showCategories
+
+    -- View items inside category
+    local function showCategoryItems(categoryData)
+        clearMenu()
+        titleLabel.Text = categoryData.CategoryName
+        backButton.Visible = true
+        scrollingFrame.CanvasPosition = Vector2.new(0, 0) -- Reset scroll window location to top
+        
+        for index, itemName in ipairs(categoryData.Items) do
+            if itemName ~= "" then
+                local btn = Instance.new("TextButton")
+                btn.Name = itemName .. "_Button"
+                btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                btn.Font = Enum.Font.Michroma
+                btn.TextSize = 10
+                btn.TextWrapped = true
+                btn.Text = itemName
+                btn.LayoutOrder = index
+                btn.Parent = scrollingFrame
+                
+                local btnCorner = Instance.new("UICorner")
+                btnCorner.CornerRadius = UDim.new(0, 8)
+                btnCorner.Parent = btn
+                
+                btn.MouseButton1Click:Connect(function()
+                    commandEvent:FireServer("Spawn Item", itemName)
+                    print("Fired event to spawn: " .. itemName)
+                end)
+            end
+        end
+    end
+
+    -- View categories
+    showCategories = function()
+        clearMenu()
+        titleLabel.Text = "Categories"
+        titleLabel.Position = UDim2.new(0, 0, 0, 0)
+        titleLabel.Size = UDim2.new(1, 0, 1, 0)
+        backButton.Visible = false
+        scrollingFrame.CanvasPosition = Vector2.new(0, 0) -- Reset scroll window location to top
+        
+        for index, categoryData in ipairs(MenuData) do
+            local btn = Instance.new("TextButton")
+            btn.Name = categoryData.CategoryName .. "_CategoryButton"
+            btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.Michroma
+            btn.TextSize = 11
+            btn.TextWrapped = true
+            btn.Text = categoryData.CategoryName
+            btn.LayoutOrder = index 
+            btn.Parent = scrollingFrame
+            
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 8)
+            btnCorner.Parent = btn
+            
+            btn.MouseButton1Click:Connect(function()
+                titleLabel.Position = UDim2.new(0, 90, 0, 0)
+                titleLabel.Size = UDim2.new(1, -90, 1, 0)
+                showCategoryItems(categoryData)
+            end)
+        end
+    end
+
+    backButton.MouseButton1Click:Connect(function()
+        showCategories()
+    end)
+
+    showCategories()
+end
+
+-- Character management tracking
+player.CharacterAdded:Connect(setupTorsoMenu)
+if player.Character then
+    setupTorsoMenu(player.Character)
+end
+
+-- --- CONTROLLER INPUT HANDLING ---
+UserInputService.InputBegan:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.ButtonL3 then
+        if torsoMenuGui and torsoMenuPart then
+            torsoMenuGui.Enabled = not torsoMenuGui.Enabled
+        end
+    end
+end)
