@@ -1,0 +1,351 @@
+-- VR Torso Menu Script (Fixed Syntax + Steady Linear Unfreeze + Player & Camera Exclusion Fixed)
+-- Execute via Solara
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Master switch for the UI text state
+local IS_SCRIPT_ENABLED = false 
+
+-- Torso Menu UI References
+local torsoMenuPart = nil
+local torsoMenuGui = nil
+local toggleButton = nil
+
+-- Caches for states
+local originalStates = {}
+local toolConnections = {}
+local workspaceConnection = nil
+local processedBullets = {} 
+
+-- References to game folders
+local itemsFolder = Workspace:FindFirstChild("Items")
+
+-- CREATE THE REPLICATED BULLETS FOLDER CLEANLY
+local replicatedBullets = Workspace:FindFirstChild("ReplicatedBullets")
+if not replicatedBullets then
+	replicatedBullets = Instance.new("Folder")
+	replicatedBullets.Name = "ReplicatedBullets"
+	replicatedBullets.Parent = Workspace
+end
+
+-- --- PROCESS INDIVIDUAL INSTANCE FOR TIMESTOP ---
+local function freezeInstance(desc)
+	if not IS_SCRIPT_ENABLED or not desc or not desc.Parent then return end
+	
+	-- HARD EXCLUSION: Completely protect your own character model/parts from being frozen or modified
+	if player.Character and (desc == player.Character or desc:IsDescendantOf(player.Character)) then 
+		return 
+	end
+
+	-- CAMERA EXCLUSION: Protect VR Holsters and items attached to the player's Camera
+	if desc == Workspace.CurrentCamera or desc:IsDescendantOf(Workspace.CurrentCamera) then
+		return
+	end
+	
+	-- ROOT WORKSPACE TRAIL SWEEPER (Fast top-level filter)
+	if desc.Parent == Workspace and (desc.Name == "Trail" or desc.Name == "Beam" or desc:IsA("Trail") or desc:IsA("Beam")) then
+		desc:Destroy()
+		return
+	end
+	
+	-- Fast cache checking to prevent deep-hierarchy scans
+	if processedBullets[desc] or originalStates[desc] then return end
+	if desc:IsDescendantOf(replicatedBullets) then return end
+	
+	-- Skip everything inside Workspace.Items instantly
+	if itemsFolder and desc:IsDescendantOf(itemsFolder) then return end
+
+	-- BULLET DUPLICATION INTERCEPT
+	if desc.Name == "Bullet" and desc:IsA("BasePart") then
+		processedBullets[desc] = true -- Lock instantly
+		
+		-- 1. Create a clean visual clone inside our safe folder
+		local visualBullet = desc:Clone()
+		visualBullet.Name = "PersistentFrozenBullet"
+		visualBullet.CanCollide = false
+		visualBullet.Anchored = true -- Prevent server script error loops
+		
+		-- 2. Bullet Aesthetic Properties (Gold, Metal, Visible)
+		visualBullet.Material = Enum.Material.Metal
+		visualBullet.Color = Color3.fromRGB(218, 165, 32)
+		visualBullet.Transparency = 0 
+		
+		-- Clean internal instances safely
+		local descendants = visualBullet:GetDescendants()
+		for i = 1, #descendants do
+			local subItem = descendants[i]
+			if subItem:IsA("LuaSourceContainer") or subItem:IsA("Trail") or subItem:IsA("Beam") then
+				subItem:Destroy()
+			end
+		end
+		
+		visualBullet.Parent = replicatedBullets
+		
+		-- 3. Smooth CFrame Glide (0.3 Stud Target on Time Stop)
+		local targetCFrame = desc.CFrame * CFrame.new(0, 0, -0.3) 
+		local glideTweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		TweenService:Create(visualBullet, glideTweenInfo, { CFrame = targetCFrame }):Play()
+		
+		-- 4. Hide the original server bullet locally
+		desc.Transparency = 1
+		local origDescendants = desc:GetDescendants()
+		for i = 1, #origDescendants do
+			local child = origDescendants[i]
+			if child:IsA("BasePart") or child:IsA("Decal") then
+				child.Transparency = 1
+			elseif child:IsA("Beam") or child:IsA("Trail") or child:IsA("ParticleEmitter") then
+				child.Enabled = false
+			end
+		end
+		return
+	end
+
+	-- Handle Regular Physics Parts (NPCs, standard blocks, environment)
+	if desc:IsA("BasePart") and not desc.Anchored and desc.Name ~= "Bullet" and desc.Name ~= "Shell" and desc.Name ~= "PersistentFrozenBullet" then
+		originalStates[desc] = {
+			linear = desc.AssemblyLinearVelocity,
+			angular = desc.AssemblyAngularVelocity,
+			isAnchored = desc.Anchored,
+			stackedVelocity = Vector3.new(0, 0, 0)
+		}
+
+		local tweenInfo = TweenInfo.new(1.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		TweenService:Create(desc, tweenInfo, {
+			AssemblyLinearVelocity = Vector3.new(0, 0, 0),
+			AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		}):Play()
+		
+		task.delay(1.5, function()
+			if IS_SCRIPT_ENABLED and desc and desc:IsA("BasePart") then
+				desc.Anchored = true
+			end
+		end)
+	end
+
+	-- Handle Animation Tracks safely
+	if desc:IsA("AnimationTrack") then
+		originalStates[desc] = { speed = desc.Speed }
+		pcall(function() desc.Speed = 0 end)
+	elseif desc:IsA("Animator") then
+		local playingTracks = desc:GetPlayingAnimationTracks()
+		for i = 1, #playingTracks do
+			local track = playingTracks[i]
+			if not originalStates[track] then
+				originalStates[track] = { speed = track.Speed }
+			end
+			pcall(function() track.Speed = 0 end)
+		end
+	end
+end
+
+-- --- FULLY AUTOMATIC HIT DETECTION ---
+local function startTrackingYourHits(character)
+	for i = 1, #toolConnections do toolConnections[i]:Disconnect() end
+	table.clear(toolConnections)
+
+	local function monitorTool(tool)
+		if not tool:IsA("Tool") then return end
+		
+		local conn = tool.Activated:Connect(function()
+			if not IS_SCRIPT_ENABLED then return end
+			
+			task.wait(0.05) 
+			
+			local toolPart = tool:FindFirstChildWhichIsA("BasePart") or character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+			if not toolPart then return end
+			
+			for desc, saved in pairs(originalStates) do
+				if desc and desc:IsA("BasePart") and type(saved) == "table" then
+					local distance = (desc.Position - toolPart.Position).Magnitude
+					if distance < 12 then 
+						local pushDirection = (desc.Position - character.PrimaryPart.Position).Unit * 10 + Vector3.new(0, 8, 0)
+						saved.stackedVelocity = saved.stackedVelocity + pushDirection
+						
+						local oldColor = desc.Color
+						desc.Color = Color3.fromRGB(255, 255, 255)
+						task.delay(0.05, function() if desc then desc.Color = oldColor end end)
+					end
+				end
+			end
+		end)
+		table.insert(toolConnections, conn)
+	end
+
+	character.ChildAdded:Connect(monitorTool)
+	local children = character:GetChildren()
+	for i = 1, #children do monitorTool(children[i]) end
+end
+
+-- --- TIME STOP / TIME RESUME LOGIC ---
+local function applyTimeStop()
+	if not IS_SCRIPT_ENABLED then return end
+
+	if not itemsFolder then itemsFolder = Workspace:FindFirstChild("Items") end
+
+	local rootChildren = Workspace:GetChildren()
+	for i = 1, #rootChildren do
+		local desc = rootChildren[i]
+		if desc.Name == "Trail" or desc.Name == "Beam" or desc:IsA("Trail") or desc:IsA("Beam") then
+			desc:Destroy()
+		end
+	end
+
+	local allDescendants = Workspace:GetDescendants()
+	for i = 1, #allDescendants do
+		freezeInstance(allDescendants[i])
+	end
+
+	if not workspaceConnection then
+		workspaceConnection = Workspace.DescendantAdded:Connect(function(descendant)
+			if not IS_SCRIPT_ENABLED then return end
+			task.defer(freezeInstance, descendant)
+		end)
+	end
+end
+
+local function restoreTime()
+	if workspaceConnection then
+		workspaceConnection:Disconnect()
+		workspaceConnection = nil
+	end
+
+	-- Restore regular environmental assets smoothly
+	for instance, saved in pairs(originalStates) do
+		if instance and instance.Parent and type(saved) == "table" then
+			if instance:IsA("BasePart") then
+				instance.Anchored = saved.isAnchored
+				local finalVelocity = saved.linear + saved.stackedVelocity
+				if saved.stackedVelocity.Magnitude > 5 then
+					instance.AssemblyLinearVelocity = finalVelocity
+					instance.AssemblyAngularVelocity = saved.angular + Vector3.new(math.random(-10,10), math.random(-10,10), math.random(-10,10))
+				else
+					local tweenInfo = TweenInfo.new(1.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+					TweenService:Create(instance, tweenInfo, {
+						AssemblyLinearVelocity = finalVelocity,
+						AssemblyAngularVelocity = saved.angular
+					}):Play()
+				end
+			elseif instance:IsA("AnimationTrack") then
+				pcall(function() instance.Speed = saved.speed end)
+			end
+		end
+	end
+	
+	table.clear(originalStates)
+	table.clear(processedBullets)
+	
+	-- --- STEADY LINEAR CONSTANT GLIDE ON UNFREEZE (No Snapping) ---
+	local frozenBullets = replicatedBullets:GetChildren()
+	for i = 1, #frozenBullets do
+		local bullet = frozenBullets[i]
+		if bullet:IsA("BasePart") then
+			local launchTargetCFrame = bullet.CFrame * CFrame.new(0, 0, -15) 
+			
+			local unfreezeTweenInfo = TweenInfo.new(
+				0.5,                          
+				Enum.EasingStyle.Quad,      
+				Enum.EasingDirection.In
+			)
+			
+			local flyTween = TweenService:Create(bullet, unfreezeTweenInfo, {
+				CFrame = launchTargetCFrame,
+				Transparency = 1
+			})
+			
+			flyTween:Play()
+			
+			task.delay(2.0, function()
+				if bullet then bullet:Destroy() end
+			end)
+		end
+	end
+end
+
+-- --- PHYSICAL TORSO MENU CREATION ---
+local function updateButtonVisuals()
+	if not toggleButton then return end
+	if IS_SCRIPT_ENABLED then
+		toggleButton.BackgroundColor3 = Color3.fromRGB(40, 180, 100)
+		toggleButton.Text = "Timefreeze: ON"
+		applyTimeStop()
+	else
+		toggleButton.BackgroundColor3 = Color3.fromRGB(74, 114, 153)
+		toggleButton.Text = "Timefreeze: OFF"
+		restoreTime()
+	end
+end
+
+local function toggleScriptState()
+	IS_SCRIPT_ENABLED = not IS_SCRIPT_ENABLED
+	updateButtonVisuals()
+end
+
+local function setupTorsoMenu(character)
+	if torsoMenuPart then torsoMenuPart:Destroy() end
+	local torso = character:WaitForChild("UpperTorso", 0.1) or character:WaitForChild("Torso", 0.1)
+	if not torso then return end
+	
+	torsoMenuPart = Instance.new("Part")
+	torsoMenuPart.Name = "VRTorsoMenuPart"
+	torsoMenuPart.Size = Vector3.new(1.6, 0.5, 0.1) 
+	torsoMenuPart.Transparency = 1
+	torsoMenuPart.Massless = true
+	torsoMenuPart.CanCollide = false
+	torsoMenuPart.CanQuery = false 
+	torsoMenuPart.CanTouch = false
+	torsoMenuPart.Parent = character
+	
+	local weld = Instance.new("Weld")
+	weld.Part0 = torso
+	weld.Part1 = torsoMenuPart
+	weld.C0 = CFrame.new(-2, 2.01, -6.1) 
+	weld.Parent = torsoMenuPart
+	
+	torsoMenuGui = Instance.new("SurfaceGui")
+	torsoMenuGui.Name = "VRTorsoMenuGui"
+	torsoMenuGui.Face = Enum.NormalId.Back 
+	torsoMenuGui.AlwaysOnTop = true
+	torsoMenuGui.ResetOnSpawn = false
+	torsoMenuGui.CanvasSize = Vector2.new(400, 150) 
+	torsoMenuGui.Enabled = false
+	torsoMenuGui.Adornee = torsoMenuPart 
+	torsoMenuGui.Parent = playerGui 
+	
+	toggleButton = Instance.new("TextButton")
+	toggleButton.Size = UDim2.new(1, 0, 1, 0)
+	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	toggleButton.TextSize = 36
+	toggleButton.Font = Enum.Font.SourceSansBold
+	toggleButton.Parent = torsoMenuGui
+	
+	local uiCorner = Instance.new("UICorner")
+	uiCorner.CornerRadius = UDim.new(0, 16)
+	uiCorner.Parent = toggleButton
+	
+	updateButtonVisuals()
+	
+	toggleButton.MouseButton1Click:Connect(function()
+		toggleScriptState()
+	end)
+	
+	startTrackingYourHits(character)
+end
+
+player.CharacterAdded:Connect(setupTorsoMenu)
+if player.Character then setupTorsoMenu(player.Character) end
+
+--- --- CONTROLLER INPUT HANDLING ---
+UserInputService.InputBegan:Connect(function(input, processed)
+	if input.KeyCode == Enum.KeyCode.ButtonL3 then
+		if torsoMenuGui and torsoMenuPart then
+			torsoMenuGui.Enabled = not torsoMenuGui.Enabled
+			torsoMenuPart.Transparency = torsoMenuGui.Enabled and 0 or 1
+		end
+	end
+end)
