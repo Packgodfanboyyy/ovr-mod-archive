@@ -1,0 +1,426 @@
+-- ==========================================
+-- 1. CONFIGURATION & MAIN STORAGE ID
+-- ==========================================
+local PROPS_FOLDER_ASSET_ID = 108883612492336  -- <-- Change this to your uploaded Folder's ID
+
+-- ==========================================
+-- 2. SERVICES & PLAYER GLOBALS
+-- ==========================================
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local PropsStorage = nil
+local CategoriesData = {} 
+local menuPart = nil 
+
+-- ==========================================
+-- 3. CORE SPAWN LOGIC
+-- ==========================================
+local function spawnModel(categoryName, modelName)
+    local character = player.Character
+    if not character then return end
+    
+    local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+    if not torso then return end
+    
+    if not PropsStorage then return end
+    
+    local categoryFolder = PropsStorage:FindFirstChild(categoryName)
+    local sourceModel = categoryFolder and categoryFolder:FindFirstChild(modelName)
+    
+    if sourceModel then
+        local model = sourceModel:Clone()
+        
+        if model:IsA("BasePart") then
+            model.Anchored = false
+        end
+     
+        for _, descendant in ipairs(model:GetDescendants()) do
+            if descendant:IsA("BasePart") then
+                descendant.Anchored = false
+            end
+        end
+
+        model.Parent = workspace
+        
+        local spawnPosition = torso.CFrame * CFrame.new(0, 0, -10)
+        local rotationOffset = CFrame.Angles(-90, math.rad(0), 180)
+        local finalCFrame = spawnPosition * rotationOffset
+        
+        if model:IsA("Model") then
+            model:PivotTo(finalCFrame)
+        elseif model:IsA("BasePart") then
+            model.CFrame = finalCFrame
+        end
+    end
+end
+
+-- ==========================================
+-- 4. PHYSICAL GMOD-STYLE VR MENU (SURFACEGUI)
+-- ==========================================
+local surfaceGui = Instance.new("SurfaceGui")
+surfaceGui.Name = "VRPropsSpawner"
+surfaceGui.AlwaysOnTop = true
+surfaceGui.CanvasSize = Vector2.new(520, 380) 
+surfaceGui.Face = Enum.NormalId.Front         
+surfaceGui.ResetOnSpawn = false
+surfaceGui.Enabled = false
+surfaceGui.Parent = playerGui
+
+-- Glass Style: Main Background Panel changed to CanvasGroup for proper transparency layering
+local mainFrame = Instance.new("CanvasGroup")
+mainFrame.Size = UDim2.new(1, 0, 1, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) -- Dark tint tint
+mainFrame.GroupTransparency = 0.35 -- Makes the entire menu beautifully translucent/transparent
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = surfaceGui
+
+-- Rounded corners for a sleek glass layout look
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 12)
+mainCorner.Parent = mainFrame
+
+-- Glossy Overlay Gradient (Creates the shiny frosted glass sheen reflection)
+local glassSheen = Instance.new("Frame")
+glassSheen.Size = UDim2.new(1, 0, 1, 0)
+glassSheen.BackgroundTransparency = 0
+glassSheen.BorderSizePixel = 0
+glassSheen.ZIndex = 0
+glassSheen.Parent = mainFrame
+
+local sheenGradient = Instance.new("UIGradient")
+sheenGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+	ColorSequenceKeypoint.new(0.4, Color3.fromRGB(150, 150, 150)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0))
+})
+sheenGradient.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.85), -- Mild gloss flare at top
+	NumberSequenceKeypoint.new(0.5, 0.95),
+	NumberSequenceKeypoint.new(1, 1) -- Drops to fully clear at the bottom
+})
+sheenGradient.Rotation = 45 -- Diagonal glare path
+sheenGradient.Parent = glassSheen
+
+-- Sleek light border outline to emulate glass thickness catching light
+local glassStroke = Instance.new("UIStroke")
+glassStroke.Thickness = 2
+glassStroke.Color = Color3.fromRGB(255, 255, 255)
+glassStroke.Transparency = 0.65 -- Soft highlight rim
+glassStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+glassStroke.Parent = mainFrame
+
+-- Top Menu Bar (Translucent Blue Header Accent)
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 34)
+titleBar.BackgroundColor3 = Color3.fromRGB(74, 114, 153)
+titleBar.BackgroundTransparency = 0.2 -- Matches the glass look
+titleBar.BorderSizePixel = 0
+titleBar.ZIndex = 2
+titleBar.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -10, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.Text = "OVR's Mod Spawn Menu"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.BackgroundTransparency = 1
+title.TextSize = 14
+title.Font = Enum.Font.SourceSansBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 3
+title.Parent = titleBar
+
+-- LEFT PANEL: Translucent Sidebar for Category Folders
+local sidebarFrame = Instance.new("ScrollingFrame")
+sidebarFrame.Size = UDim2.new(0.30, -10, 1, -50)
+sidebarFrame.Position = UDim2.new(0, 10, 0, 42)
+sidebarFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+sidebarFrame.BackgroundTransparency = 0.4 -- Translucent glass background
+sidebarFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+sidebarFrame.BorderSizePixel = 0
+sidebarFrame.ScrollBarThickness = 4
+sidebarFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+sidebarFrame.ZIndex = 2
+sidebarFrame.Parent = mainFrame
+
+local sidebarStroke = Instance.new("UIStroke")
+sidebarStroke.Thickness = 1
+sidebarStroke.Color = Color3.fromRGB(255, 255, 255)
+sidebarStroke.Transparency = 0.8
+sidebarStroke.Parent = sidebarFrame
+
+local sidebarLayout = Instance.new("UIListLayout")
+sidebarLayout.Padding = UDim.new(0, 2)
+sidebarLayout.Parent = sidebarFrame
+
+-- RIGHT PANEL: Translucent Grid View for Props
+local contentFrame = Instance.new("ScrollingFrame")
+contentFrame.Size = UDim2.new(0.70, -15, 1, -50)
+contentFrame.Position = UDim2.new(0.30, 5, 0, 42)
+contentFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+contentFrame.BackgroundTransparency = 0.5 -- Translucent glass background
+contentFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+contentFrame.BorderSizePixel = 0
+contentFrame.ScrollBarThickness = 6
+contentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+contentFrame.ZIndex = 2
+contentFrame.Parent = mainFrame
+
+local contentStroke = Instance.new("UIStroke")
+contentStroke.Thickness = 1
+contentStroke.Color = Color3.fromRGB(255, 255, 255)
+contentStroke.Transparency = 0.8
+contentStroke.Parent = contentFrame
+
+local gridLayout = Instance.new("UIGridLayout")
+gridLayout.CellSize = UDim2.new(0, 90, 0, 90) 
+gridLayout.CellPadding = UDim2.new(0, 6, 0, 6)
+gridLayout.SortOrder = Enum.SortOrder.Name
+gridLayout.Parent = contentFrame
+
+local gridPadding = Instance.new("UIPadding")
+gridPadding.PaddingTop = UDim.new(0, 6)
+gridPadding.PaddingLeft = UDim.new(0, 6)
+gridPadding.Parent = contentFrame
+
+-- ==========================================
+-- 5. RESPAWN & POSITION HANDLING
+-- ==========================================
+local function setupMenuPart(character)
+	if menuPart then menuPart:Destroy() end
+	
+	menuPart = Instance.new("Part")
+	menuPart.Name = "VR_MenuDisplayPart"
+	menuPart.Size = Vector3.new(4.4, 3.2, 0.05) 
+	
+	-- Physical Glass Blur: Keeping the material as glass so anything in the game world behind it gets blurred!
+	menuPart.Transparency = 1
+	menuPart.Material = Enum.Material.Glass
+	menuPart.Color = Color3.fromRGB(30, 30, 35)
+	
+	menuPart.CanCollide = false  
+	menuPart.Massless = true     
+	menuPart.CanQuery = false    
+	menuPart.CanTouch = false
+	menuPart.Anchored = true     
+	menuPart.Parent = workspace
+
+	surfaceGui.Adornee = menuPart
+end
+
+if player.Character then setupMenuPart(player.Character) end
+player.CharacterAdded:Connect(setupMenuPart)
+
+RunService.RenderStepped:Connect(function()
+	if not menuPart then return end
+	local character = player.Character
+	if character then
+		local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+		if torso then
+			menuPart.CFrame = torso.CFrame * CFrame.new(1, 0.5, -6.2) * CFrame.Angles(0, math.rad(180), 0)
+		end
+	end
+end)
+
+-- ==========================================
+-- 6. DYNAMIC GMOD INTERACTION & RENDERING
+-- ==========================================
+local currentActiveButton = nil
+
+local function loadCategory(categoryName, categoryButton)
+	if currentActiveButton then
+		currentActiveButton.BackgroundColor3 = Color3.fromRGB(56, 56, 56)
+		currentActiveButton.BackgroundTransparency = 0.3
+		currentActiveButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+	end
+	currentActiveButton = categoryButton
+	currentActiveButton.BackgroundColor3 = Color3.fromRGB(74, 114, 153)
+	currentActiveButton.BackgroundTransparency = 0.1
+	currentActiveButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+	for _, child in ipairs(contentFrame:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+	
+	local modelsInFolder = CategoriesData[categoryName]
+	if not modelsInFolder then return end
+	
+	for _, childObj in ipairs(modelsInFolder) do
+		local propTile = Instance.new("TextButton")
+		propTile.Size = UDim2.new(0, 90, 0, 90)
+		propTile.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+		propTile.BackgroundTransparency = 0.2
+		propTile.BorderColor3 = Color3.fromRGB(255, 255, 255)
+		propTile.BorderSizePixel = 0
+		propTile.Text = ""
+		propTile.ZIndex = 3
+		propTile.Parent = contentFrame
+		
+		local tileStroke = Instance.new("UIStroke")
+		tileStroke.Thickness = 1
+		tileStroke.Color = Color3.fromRGB(255, 255, 255)
+		tileStroke.Transparency = 0.85
+		tileStroke.Parent = propTile
+		
+		local tileCorner = Instance.new("UICorner")
+		tileCorner.CornerRadius = UDim.new(0, 6)
+		tileCorner.Parent = propTile
+
+		local viewFrame = Instance.new("ViewportFrame")
+		viewFrame.Size = UDim2.new(1, 0, 1, -18) 
+		viewFrame.Position = UDim2.new(0, 0, 0, 0)
+		viewFrame.BackgroundTransparency = 1
+		viewFrame.ZIndex = 4
+		viewFrame.Parent = propTile
+		
+		local previewObj = childObj:Clone()
+		if previewObj:IsA("Model") then
+			previewObj:PivotTo(CFrame.new(0, 0, 0))
+		elseif previewObj:IsA("BasePart") then
+			previewObj.CFrame = CFrame.new(0, 0, 0)
+		end
+		previewObj.Parent = viewFrame
+		
+		local previewCam = Instance.new("Camera")
+		viewFrame.CurrentCamera = previewCam
+		previewCam.Parent = viewFrame
+		
+		local currentCF, currentSize
+		if childObj:IsA("Model") then
+			currentCF, currentSize = childObj:GetBoundingBox()
+		else
+			currentCF = childObj.CFrame
+			currentSize = childObj.Size
+		end
+		
+		local distance = math.max(currentSize.X, currentSize.Y, currentSize.Z) * 1.4
+		previewCam.CFrame = CFrame.new(Vector3.new(distance, distance * 0.8, distance), Vector3.new(0, 0, 0))
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, -4, 0, 14)
+		nameLabel.Position = UDim2.new(0, 2, 1, -16)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = childObj.Name
+		nameLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+		nameLabel.Font = Enum.Font.SourceSans
+		nameLabel.TextSize = 10 
+		nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+		nameLabel.ZIndex = 4
+		nameLabel.Parent = propTile
+
+		propTile.MouseEnter:Connect(function()
+			propTile.BackgroundColor3 = Color3.fromRGB(74, 114, 153)
+			tileStroke.Transparency = 0.5
+		end)
+		propTile.MouseLeave:Connect(function()
+			propTile.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+			tileStroke.Transparency = 0.85
+		end)
+		
+		propTile.MouseButton1Click:Connect(function()
+			spawnModel(categoryName, childObj.Name)
+		end)
+	end
+	
+	task.wait()
+	contentFrame.CanvasSize = UDim2.new(0, 0, 0, gridLayout.AbsoluteContentSize.Y + 15)
+end
+
+local function generateSidebarUI()
+	for _, child in ipairs(sidebarFrame:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+
+	local firstCategoryName = nil
+	local firstCategoryBtn = nil
+
+	for categoryName, _ in pairs(CategoriesData) do
+		if not firstCategoryName then firstCategoryName = categoryName end
+
+		local catBtn = Instance.new("TextButton")
+		catBtn.Size = UDim2.new(1, 0, 0, 28)
+		catBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+		catBtn.BackgroundTransparency = 0.3
+		catBtn.BorderSizePixel = 0
+		catBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+		catBtn.Text = "  " .. categoryName
+		catBtn.Font = Enum.Font.SourceSans
+		catBtn.TextSize = 13
+		catBtn.TextXAlignment = Enum.TextXAlignment.Left
+		catBtn.ZIndex = 3
+		catBtn.Parent = sidebarFrame
+		
+		local catCorner = Instance.new("UICorner")
+		catCorner.CornerRadius = UDim.new(0, 4)
+		catCorner.Parent = catBtn
+		
+		if not firstCategoryBtn then firstCategoryBtn = catBtn end
+
+		catBtn.MouseEnter:Connect(function()
+			if currentActiveButton ~= catBtn then
+				catBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+				catBtn.BackgroundTransparency = 0.1
+			end
+		end)
+		catBtn.MouseLeave:Connect(function()
+			if currentActiveButton ~= catBtn then
+				catBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+				catBtn.BackgroundTransparency = 0.3
+			end
+		end)
+
+		catBtn.MouseButton1Click:Connect(function()
+			loadCategory(categoryName, catBtn)
+		end)
+	end
+	
+	sidebarFrame.CanvasSize = UDim2.new(0, 0, 0, sidebarLayout.AbsoluteContentSize.Y)
+
+	if firstCategoryName and firstCategoryBtn then
+		loadCategory(firstCategoryName, firstCategoryBtn)
+	end
+end
+
+-- ==========================================
+-- 7. VR CONTROLLER TOGGLE LOGIC
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.ButtonL3 then
+		surfaceGui.Enabled = not surfaceGui.Enabled
+		if menuPart then
+			menuPart.Transparency = surfaceGui.Enabled and 0.4 or 1
+		end
+	end
+end)
+
+-- Asset Extraction
+local function loadAndIndexPropsStorage()
+	title.Text = "OVR's Mod Spawn Menu (Loading...)"
+	local success, objects = pcall(function()
+		return game:GetObjects("rbxassetid://" .. PROPS_FOLDER_ASSET_ID)
+	end)
+	
+	if success and objects and objects[1] then
+		PropsStorage = objects[1]
+		
+		for _, folder in ipairs(PropsStorage:GetChildren()) do
+			if folder:IsA("Folder") or folder:IsA("Model") then
+				CategoriesData[folder.Name] = {}
+				for _, prop in ipairs(folder:GetChildren()) do
+					table.insert(CategoriesData[folder.Name], prop)
+				end
+			end
+		end
+		
+		title.Text = "OVR's Mod Spawn Menu"
+		generateSidebarUI()
+	else
+		title.Text = "OVR's Mod Spawn Menu (Error Loading!)"
+	end
+end
+
+task.spawn(loadAndIndexPropsStorage)
