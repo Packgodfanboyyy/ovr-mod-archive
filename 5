@@ -1,0 +1,93 @@
+-- VR Torso Text Display Panel (Starts Visible)
+-- Place in StarterPlayerScripts or StarterCharacterScripts
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Torso Menu UI References
+local torsoMenuPart = nil
+local torsoMenuGui = nil
+local displayLabel = nil -- Replaced toggleButton with displayLabel
+
+-- --- PHYSICAL TORSO MENU CREATION ---
+local function setupTorsoMenu(character)
+    if torsoMenuPart then torsoMenuPart:Destroy() end
+    
+    local torso = character:WaitForChild("UpperTorso", 0.1) or character:WaitForChild("Torso", 0.1)
+    if not torso then return end
+    
+    -- Creating physical menu anchor part with your exact specifications
+    torsoMenuPart = Instance.new("Part")
+    torsoMenuPart.Name = "VRTorsoMenuPart"
+    torsoMenuPart.Size = Vector3.new(2.2, 1.85, 0.1) 
+    torsoMenuPart.Transparency = 1
+    torsoMenuPart.Massless = true
+    torsoMenuPart.CanCollide = false
+    torsoMenuPart.CanQuery = false 
+    torsoMenuPart.CanTouch = false
+    torsoMenuPart.Parent = character
+    
+    local weld = Instance.new("Weld")
+    weld.Part0 = torso
+    weld.Part1 = torsoMenuPart
+    weld.C0 = CFrame.new(-3.915, 0.985, -6.1) -- Your exact offset (-3 studs out)
+    weld.Parent = torsoMenuPart
+    
+    -- UI configuration optimized for VR tracking
+    torsoMenuGui = Instance.new("SurfaceGui")
+    torsoMenuGui.Name = "VRTorsoMenuGui"
+    torsoMenuGui.Face = Enum.NormalId.Back 
+    torsoMenuGui.AlwaysOnTop = true
+    torsoMenuGui.ResetOnSpawn = false
+    torsoMenuGui.CanvasSize = Vector2.new(400, 150) 
+    torsoMenuGui.Enabled = false
+    torsoMenuGui.Adornee = torsoMenuPart 
+    torsoMenuGui.Parent = playerGui 
+    
+    -- REPLACED TextButton with TextLabel as requested
+    displayLabel = Instance.new("TextLabel")
+    displayLabel.Size = UDim2.new(1, 0, 1, 0)
+    displayLabel.BackgroundColor3 = Color3.fromRGB(15, 15, 15) -- Kept your flat background color
+    displayLabel.BackgroundTransparency = 0.85
+    displayLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    displayLabel.TextSize = 10
+    displayLabel.TextScaled = true
+    displayLabel.Font = Enum.Font.Michroma
+    
+    -- CHANGE THIS LINE BELOW TO YOUR CUSTOM TEXT
+    displayLabel.Text = [[[Note]
+    Only Have 1 Toggled at Once, Otherwise ButtonInputs Get Overlapped Over Eachother.]]
+    
+    displayLabel.Parent = torsoMenuGui
+    
+    local uiCorner = Instance.new("UICorner")
+    uiCorner.CornerRadius = UDim.new(0, 16)
+    uiCorner.Parent = displayLabel
+end
+
+-- Character management tracking
+player.CharacterAdded:Connect(setupTorsoMenu)
+if player.Character then
+    setupTorsoMenu(player.Character)
+end
+
+-- --- CONTROLLER INPUT HANDLING (Open/Close Toggle Only) ---
+UserInputService.InputBegan:Connect(function(input, processed)
+    -- L3 Button toggles the display visibility on/off
+    if input.KeyCode == Enum.KeyCode.ButtonL3 then
+        if torsoMenuGui and torsoMenuPart then
+            -- Toggle the GUI screen state
+            torsoMenuGui.Enabled = not torsoMenuGui.Enabled
+          
+            -- Match part visibility to the GUI state
+            if torsoMenuGui.Enabled then
+                torsoMenuPart.Transparency = 1 -- Fully visible when open
+            else
+                torsoMenuPart.Transparency = 1 -- Completely invisible when closed
+            end
+        end
+    end
+end)
