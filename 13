@@ -1,0 +1,57 @@
+-- The Asset ID you want to enforce (Confetti sound effect)
+local OVERRIDE_AUDIO_ID = "rbxassetid://109081723292068"
+local COOLDOWN_DURATION = 0.1 -- Minimum seconds allowed between confetti sounds
+
+-- Track the last time the sound was played to prevent multi-plays
+local lastPlayTime = 0
+
+-- A list of known original asset IDs from that script to target precisely
+local targetAudioIds = {
+	["rbxassetid://429400881"] = true,
+	["rbxassetid://7837535984"] = true,
+	["rbxassetid://9114636086"] = true,
+	["rbxassetid://9114636274"] = true,
+	["rbxassetid://9114635917"] = true,
+	["rbxassetid://201674629"] = true,
+}
+
+local function enforceSinglePlay(instance)
+	if instance:IsA("Sound") then
+		
+		local function processSound()
+			if targetAudioIds[instance.SoundId] then
+				local currentTime = os.clock()
+				
+				-- Check if enough time has passed since the last confetti sound
+				if (currentTime - lastPlayTime) >= COOLDOWN_DURATION then
+					lastPlayTime = currentTime
+					instance.SoundId = OVERRIDE_AUDIO_ID
+					instance.Looped = false -- Force loop off
+				else
+					-- If it's duplicating within the cooldown window, mute this duplicate
+					instance.Volume = 0
+					instance:Stop()
+				end
+			end
+		end
+
+		-- Run the check immediately upon detection
+		processSound()
+		
+		-- Also watch for late SoundId assignments or property changes
+		instance:GetPropertyChangedSignal("SoundId"):Connect(processSound)
+		instance:GetPropertyChangedSignal("Playing"):Connect(function()
+			if instance.Playing then
+				processSound()
+			end
+		end)
+	end
+end
+
+-- Monitor existing sounds
+for _, desc in ipairs(game:GetDescendants()) do
+	enforceSinglePlay(desc)
+end
+
+-- Monitor newly added sounds dynamically
+game.DescendantAdded:Connect(enforceSinglePlay)
