@@ -1,0 +1,441 @@
+-- Entirely self-contained client-sided VR Attachment Tool
+local UserInputService = game:GetService("UserInputService")
+local VRService = game:GetService("VRService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local localPlayer = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- Tool States
+local isToolActive = false
+local currentMode = "Rope" -- Modes: "Rope", "Constraint", "Weld", "Remover"
+local modesList = {"Rope", "Constraint", "Weld", "Remover"}
+local currentModeIndex = 1
+
+-- State Check for Hold & Release
+local isHoldingTrigger = false
+local firstTargetPart = nil
+local firstLocalOffset = nil 
+
+-- Dynamically Created Physical UI References
+local uiPart = nil
+local uiWeld = nil
+local surfaceGui = nil
+local toggleButton = nil
+local textIndicator = nil
+
+-- Executor-Safe Unique ID Generator
+local connectionCounter = 0
+local function getNextUniqueID(prefix)
+	connectionCounter = connectionCounter + 1
+	return prefix .. "_" .. tostring(connectionCounter)
+end
+
+----------------------------------------
+-- Helper: Find Torso and Right Arm
+----------------------------------------
+local function getTorso()
+	local character = localPlayer.Character
+	if character then
+		return character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+	end
+	return nil
+end
+
+local function getRightArm()
+	local character = localPlayer.Character
+	if character then
+		return character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+	end
+	return nil
+end
+
+----------------------------------------
+-- Strict VR Pointer Direction Calculation
+----------------------------------------
+local function performRaycast()
+	local origin, direction
+	
+	if VRService.VREnabled then
+		local handCFrame = VRService:GetUserCFrame(Enum.UserCFrame.RightHand)
+		local worldHandCFrame = camera.CFrame * handCFrame
+		origin = worldHandCFrame.Position
+		direction = worldHandCFrame.LookVector
+	else
+		local rightArm = getRightArm()
+		if rightArm then
+			origin = rightArm.Position
+			direction = rightArm.CFrame.LookVector
+		else
+			return nil, nil
+		end
+	end
+	
+	local rayDirection = direction * 250 
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	
+	local ignoreList = {localPlayer.Character, uiPart}
+	if textIndicator then table.insert(ignoreList, textIndicator) end
+	raycastParams.FilterDescendantsInstances = ignoreList
+	
+	local raycastResult = Workspace:Raycast(origin, rayDirection, raycastParams)
+	if raycastResult then
+		return raycastResult.Instance, raycastResult.Position
+	end
+	return nil, nil
+end
+
+----------------------------------------
+-- Indicator Visual Control (FIXED TEXT Labels)
+----------------------------------------
+local function updateIndicatorText()
+	if not textIndicator then return end
+	local label = textIndicator:FindFirstChild("ModeTextLabel")
+	if label then
+		label.Text = "Mode: " .. currentMode
+	end
+end
+
+local function createIndicator()
+	local rightArm = getRightArm()
+	if not rightArm or textIndicator then return end
+	
+	local bGui = Instance.new("BillboardGui")
+	bGui.Name = "VRModeIndicator"
+	bGui.Size = UDim2.new(0, 200, 0, 50)
+	bGui.StudsOffset = Vector3.new(0, 1.5, -0.5) 
+	bGui.AlwaysOnTop = true
+	bGui.Parent = rightArm
+	
+	local label = Instance.new("TextLabel")
+	label.Name = "ModeTextLabel"
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.fromRGB(189, 189, 189)
+	label.TextSize = 28
+	label.Font = Enum.Font.Michroma
+	label.TextStrokeTransparency = 0.4
+	label.Parent = bGui
+	
+	textIndicator = bGui
+	updateIndicatorText()
+end
+
+local function destroyIndicator()
+	if textIndicator then
+		textIndicator:Destroy()
+		textIndicator = nil
+	end
+end
+
+----------------------------------------
+-- UI Auto-Creation Function (Flat Torso UI)
+----------------------------------------
+local function buildInterface()
+	if uiPart then 
+		uiPart:Destroy() end
+	if surfaceGui then surfaceGui:Destroy() end
+
+	local torso = getTorso()
+	if not torso then return end
+
+	uiPart = Instance.new("Part")
+	uiPart.Name = "ClientVRMenuPart"
+	uiPart.Size = Vector3.new(1.6, 0.5, 0.1)
+	-- CHANGE THIS LINE FROM 0 TO 1 (Invisible on spawn)
+	uiPart.Transparency = 1
+	uiPart.CanCollide = false
+	uiPart.CanQuery = false
+	uiPart.CanTouch = false
+	uiPart.Massless = true
+	uiPart.Parent = torso
+
+	uiWeld = Instance.new("Weld")
+	uiWeld.Name = "ClientVRMenuWeld"
+	uiWeld.Part0 = torso
+	uiWeld.Part1 = uiPart
+	uiWeld.C0 = CFrame.new(-2, 0.47, -6.1) * CFrame.Angles(0, math.pi, 0)
+	uiWeld.Parent = uiPart
+
+	surfaceGui = Instance.new("SurfaceGui")
+	surfaceGui.Name = "ClientVRSurfaceGui"
+	surfaceGui.CanvasSize = Vector2.new(160, 50)
+	surfaceGui.AlwaysOnTop = true
+	surfaceGui.Face = Enum.NormalId.Front
+	surfaceGui.Adornee = uiPart
+	surfaceGui.Enabled = false
+	surfaceGui.Parent = playerGui
+	
+	-- Keep the rest of your toggleButton code exactly the same...
+	
+	toggleButton = Instance.new("TextButton")
+	toggleButton.Name = "ToggleTool"
+	toggleButton.Size = UDim2.new(1, 0, 1, 0)
+	toggleButton.Position = UDim2.new(0, 0, 0, 0)
+	toggleButton.BackgroundColor3 = Color3.fromRGB(74, 114, 153)
+	toggleButton.Text = "Constrainer: OFF"
+	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	toggleButton.Font = Enum.Font.SourceSansBold
+	toggleButton.TextSize = 11
+	toggleButton.BorderSizePixel = 0
+	
+	local uicorner = Instance.new("UICorner")
+	uicorner.CornerRadius = UDim.new(0, 8)
+	uicorner.Parent = toggleButton
+	toggleButton.Parent = surfaceGui
+
+	toggleButton.MouseButton1Click:Connect(function()
+		isToolActive = not isToolActive
+		if isToolActive then
+			toggleButton.Text = "Constrainer: ON"
+			toggleButton.BackgroundColor3 = Color3.fromRGB(40, 180, 100)
+			createIndicator()
+		else
+			toggleButton.Text = "Constrainer: OFF"
+			toggleButton.BackgroundColor3 = Color3.fromRGB(74, 114, 153)
+			destroyIndicator()
+			firstTargetPart = nil
+			firstLocalOffset = nil
+			isHoldingTrigger = false
+		end
+	end)
+end
+
+----------------------------------------
+-- Client Builders (Physical Integration)
+----------------------------------------
+local function createRopeBeam(partA, localOffsetA, partB, localOffsetB)
+	if partA == partB then return end 
+	
+	local uniqueID = getNextUniqueID("ClientRope")
+	
+	local attA = Instance.new("Attachment")
+	attA.Position = localOffsetA
+	attA.Name = uniqueID .. "_AttA"
+	attA.Parent = partA
+	
+	local attB = Instance.new("Attachment")
+	attB.Position = localOffsetB
+	attB.Name = uniqueID .. "_AttB"
+	attB.Parent = partB
+	
+	local posA = (partA.CFrame * CFrame.new(localOffsetA)).Position
+	local posB = (partB.CFrame * CFrame.new(localOffsetB)).Position
+	local distance = (posA - posB).Magnitude
+	
+	local rope = Instance.new("RopeConstraint")
+	rope.Attachment0 = attA
+	rope.Attachment1 = attB
+	rope.Length = distance * 1.15 
+	rope.Visible = false 
+	rope.Name = uniqueID .. "_Joint"
+	rope.Parent = partA
+	
+	local beam = Instance.new("Beam")
+	beam.Attachment0 = attA
+	beam.Attachment1 = attB
+	beam.Texture = "rbxassetid://96584426375768"
+	beam.TextureMode = Enum.TextureMode.Wrap
+	beam.TextureLength = 1.45
+	beam.Color = ColorSequence.new(Color3.fromRGB(87, 59, 44))
+	beam.Transparency = NumberSequence.new(0)
+	beam.LightEmission = 0
+	beam.LightInfluence = 1
+	beam.Width0 = 0.18
+	beam.Width1 = 0.18
+	beam.FaceCamera = true 
+	beam.Segments = 20 
+	beam.CurveSize0 = 1.5
+	beam.CurveSize1 = -1.5
+	beam.Name = "ClientRopeVisual"
+	beam.Parent = partA
+	
+	beam:SetAttribute("LinkID", uniqueID)
+	
+	local connection
+	connection = RunService.RenderStepped:Connect(function()
+		if not partA or not partB or not partA.Parent or not partB.Parent or not rope.Parent then
+			attA:Destroy()
+			attB:Destroy()
+			beam:Destroy()
+			rope:Destroy()
+			connection:Disconnect()
+		end
+	end)
+end
+
+local function createConstraintOrWeld(partA, localOffsetA, partB, localOffsetB, mode)
+	if partA == partB then return end
+	
+	local uniqueID = getNextUniqueID("ClientJoint")
+	
+	local attA = Instance.new("Attachment")
+	attA.Position = localOffsetA
+	attA.Name = uniqueID .. "_AttA"
+	attA.Parent = partA
+	
+	local attB = Instance.new("Attachment")
+	attB.Position = localOffsetB
+	attB.Name = uniqueID .. "_AttB"
+	attB.Parent = partB
+	
+	local joint = nil
+	local visualBeam = Instance.new("Beam")
+	
+	local posA = (partA.CFrame * CFrame.new(localOffsetA)).Position
+	local posB = (partB.CFrame * CFrame.new(localOffsetB)).Position
+	
+	if mode == "Constraint" then
+		joint = Instance.new("SpringConstraint")
+		joint.Attachment0 = attA
+		joint.Attachment1 = attB
+		joint.LimitsEnabled = true
+		joint.MaxLength = (posA - posB).Magnitude * 1.5
+		joint.FreeLength = (posA - posB).Magnitude
+		joint.Visible = true
+		joint.Name = uniqueID .. "_Joint"
+		
+		visualBeam.Color = ColorSequence.new(Color3.fromRGB(215, 215, 215))
+	elseif mode == "Weld" then
+		joint = Instance.new("WeldConstraint")
+		joint.Part0 = partA
+		joint.Part1 = partB
+		joint.Name = uniqueID .. "_Joint"
+		
+		visualBeam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0))
+	end
+	
+	visualBeam.Attachment0 = attA
+	visualBeam.Attachment1 = attB
+	visualBeam.Width0 = 0
+	visualBeam.Width1 = 0
+	visualBeam.FaceCamera = true
+	visualBeam.Name = "ClientVisual"
+	visualBeam.Parent = partA
+	
+	visualBeam:SetAttribute("LinkID", uniqueID)
+	
+	joint.Parent = partA
+	
+	local connection
+	connection = RunService.RenderStepped:Connect(function()
+		if not partA or not partB or not partA.Parent or not partB.Parent or not joint.Parent then
+			attA:Destroy()
+			attB:Destroy()
+			visualBeam:Destroy()
+			joint:Destroy()
+			connection:Disconnect()
+		end
+	end)
+end
+
+----------------------------------------
+-- SINGLE TARGETED DESTRUCTION MODULE
+----------------------------------------
+local function wipeObjectJoints(targetPart)
+	if not targetPart then return end
+	
+	for _, child in ipairs(targetPart:GetChildren()) do
+		if child:IsA("Beam") and (child.Name == "ClientRopeVisual" or child.Name == "ClientVisual") then
+			local linkID = child:GetAttribute("LinkID")
+			if linkID then
+				local joint = targetPart:FindFirstChild(linkID .. "_Joint")
+				local attA = targetPart:FindFirstChild(linkID .. "_AttA")
+				
+				-- Clean Part B's linked items dynamically
+				for _, workspaceInstance in ipairs(Workspace:GetDescendants()) do
+					if workspaceInstance.Name == linkID .. "_AttB" then
+						workspaceInstance:Destroy()
+					end
+				end
+				
+				if joint then joint:Destroy() end
+				if attA then attA:Destroy() end
+				child:Destroy()
+				return 
+			end
+		end
+	end
+end
+
+----------------------------------------
+-- Input Handling Architecture
+----------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+if input.KeyCode == Enum.KeyCode.ButtonL3 then
+	if surfaceGui and uiPart then
+		local currentlyEnabled = surfaceGui.Enabled
+		surfaceGui.Enabled = not currentlyEnabled
+		uiPart.Transparency = currentlyEnabled and 1 or 0
+	end
+	return
+end
+
+	if not isToolActive then return end
+	
+	if input.KeyCode == Enum.KeyCode.ButtonB then
+		currentModeIndex = currentModeIndex + 1
+		if currentModeIndex > #modesList then currentModeIndex = 1 end
+		currentMode = modesList[currentModeIndex]
+		updateIndicatorText()
+		return
+	end
+	
+	if input.KeyCode == Enum.KeyCode.ButtonR2 and not isHoldingTrigger then
+		isHoldingTrigger = true
+		
+		local targetPart, targetPos = performRaycast()
+		if targetPart then
+			if currentMode == "Remover" then
+				wipeObjectJoints(targetPart)
+			elseif targetPos then
+				firstTargetPart = targetPart
+				firstLocalOffset = targetPart.CFrame:Inverse() * targetPos
+			end
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.ButtonR2 and isHoldingTrigger then
+		isHoldingTrigger = false
+		
+		if not isToolActive or currentMode == "Remover" then 
+			firstTargetPart = nil
+			firstLocalOffset = nil
+			return 
+		end
+		
+		local secondPart, secondPos = performRaycast()
+		if firstTargetPart and secondPart and secondPos then
+			local secondLocalOffset = secondPart.CFrame:Inverse() * secondPos
+			
+			if currentMode == "Rope" then
+				createRopeBeam(firstTargetPart, firstLocalOffset, secondPart, secondLocalOffset)
+			else
+				createConstraintOrWeld(firstTargetPart, firstLocalOffset, secondPart, secondLocalOffset, currentMode)
+			end
+		end
+		
+		firstTargetPart = nil
+		firstLocalOffset = nil
+	end
+end)
+
+-- Initial Build Setup
+task.spawn(function()
+	while not getTorso() do task.wait(0.1) end
+	buildInterface()
+end)
+
+localPlayer.CharacterAdded:Connect(function()
+	task.wait(1)
+	buildInterface()
+	if isToolActive then
+		createIndicator()
+	end
+end)
