@@ -1,0 +1,100 @@
+local player = game:GetService("Players").LocalPlayer
+local debris = workspace:WaitForChild("Debris")
+local itemsFolder = workspace:FindFirstChild("Items")
+
+-- CONFIG
+local megaWidth = 0.012
+local trailLifetime = 0.22
+
+-- COLOR CONFIG
+local darkPurple = Color3.fromRGB(255, 254, 213) 
+local darkWhite = Color3.fromRGB(188, 188, 188)
+
+-- MODIFIED: Automatically gets the local player's character model
+local function getTargetModel()
+    return player.Character or player.CharacterAdded:Wait()
+end
+
+-- MODIFIED: Automatically gets the local player's left arm (supports R6 and R15)
+local function getLeftArm()
+    local model = getTargetModel()
+    if not model then return nil end
+    
+    -- Checks for R6 "Left Arm" first, then R15 "LeftUpperArm"
+    return model:FindFirstChild("Left Arm") or model:FindFirstChild("LeftUpperArm")
+end
+
+-- This stays for the Muzzle logic, but is no longer used for Trails
+local function isGunNearArm()
+    local arm = getLeftArm()
+    if not arm then return false end
+
+    local searchLocations = {player:FindFirstChild("Backpack"), player.Character, itemsFolder}
+
+    for _, location in pairs(searchLocations) do
+        if not location then continue end
+        for _, item in pairs(location:GetChildren()) do
+            local gunPos = item:IsA("Model") and item:GetPivot().Position or (item:IsA("BasePart") and item.Position) or (item:IsA("Tool") and item:FindFirstChild("Handle") and item.Handle.Position)
+            if gunPos and (gunPos - arm.Position).Magnitude <= 0.5 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function applyMuzzle()
+    if not isGunNearArm() then return end
+    local model = getTargetModel()
+    if model then
+        for _, p in pairs(model:GetDescendants()) do
+            if p.Name == "Muzzle" and p:IsA("BasePart") then
+                p.Color = darkPurple
+                p.Material = Enum.Material.Neon
+            end
+        end
+    end
+end
+
+-- MODIFIED: No longer checks for distance or specific guns
+local function handleTrail(obj)
+    if not obj:IsA("Trail") then return end
+    
+    -- We skip all "isGunNearArm" and "distToArm" checks here
+    pcall(function()
+        task.delay(0.01, function() 
+            if obj and obj.Parent then
+                -- Move trail to workspace so it persists after bullet hits
+                obj.Parent = workspace 
+                debris:AddItem(obj, 2)
+            end
+        end)
+
+        -- Visuals applied to EVERY trail detected
+        obj.WidthScale = NumberSequence.new(megaWidth)
+        obj.Lifetime = trailLifetime
+        obj.LightEmission = 0.8 
+        obj.FaceCamera = true
+        
+        obj.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        
+        obj.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, darkPurple),
+            ColorSequenceKeypoint.new(1, darkWhite)
+        })
+    end)
+end
+
+-- Listen for any new trails in Debris
+debris.DescendantAdded:Connect(handleTrail)
+
+-- Keep Muzzle logic on a loop
+task.spawn(function()
+    while true do 
+        applyMuzzle() 
+        task.wait(0.1)
+    end
+end)
