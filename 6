@@ -1,0 +1,496 @@
+-- VR Telekinesis / Physics Gun LocalScript (With Master Torso Surface-UI Toggle)
+-- Place in StarterPlayerScripts or StarterCharacterScripts
+
+local VRService = game:GetService("VRService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- --- CONFIGURATION CONFIG ---
+local MAX_RAYCAST_DISTANCE = 10000
+local TRACKING_SPEED = 9
+local DISTANCE_CHANGE_SPEED = 20
+local LAUNCH_FORCE = 100
+
+-- Colors based on Mode
+local COLOR_NORMAL_BEAM = Color3.fromRGB(0, 255, 255)       -- Cyan
+local COLOR_LAUNCH_BEAM = Color3.fromRGB(235, 130, 40)      -- Medium/Light Orange
+
+-- Sound IDs & Volumes
+local SOUND_GRAB_1_ID = "rbxassetid://7449454869"
+local SOUND_GRAB_2_ID = "rbxassetid://7449423195"
+local SOUND_RELEASE_ID = "rbxassetid://7449454513"
+local SOUND_LAUNCH_ID = "rbxassetid://8717291375"
+local SOUND_MODE_SWITCH_ID = "rbxassetid://126429670805263"
+
+local VOLUME_GRAB_1 = 0.7
+local VOLUME_GRAB_2 = 0.5
+local VOLUME_RELEASE = 0.6
+local VOLUME_LAUNCH = 0.8
+local VOLUME_MODE_SWITCH = 0.75
+-- ----------------------------
+
+-- State Variables
+local isScriptEnabled = false -- MASTER TOGGLE (Off by default)
+local isHolding = false
+local targetPart = nil
+local holdDistance = 0
+local handAttachment = nil
+local targetAttachment = nil
+local visualBeam = nil
+local currentHighlight = nil
+
+-- Torso Menu Variables
+local menuPart = nil
+local menuWeld = nil
+local menuSurfaceGui = nil
+local toggleButton = nil
+local isMenuVisible = true -- Left Joystick press hides/shows this entirely
+
+-- Modes: "Normal" or "Launch"
+local currentMode = "Normal"
+
+-- Audio Objects
+local soundGrab1 = nil
+local soundGrab2 = nil
+local soundRelease = nil
+local soundLaunch = nil
+local soundModeSwitch = nil
+
+-- Dictionary to track manually anchored objects
+local anchoredObjects = {}
+
+-- Forward declaration of drop function so GUI can use it
+local dropHeldObject
+
+-- --- DYNAMIC TORSO MENU CREATION (CLIENT-ONLY) ---
+local function updateButtonAppearance()
+	if not toggleButton then return end
+	if isScriptEnabled then
+		toggleButton.Text = "Physics: ON"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(40, 180, 100) -- Sleek Green
+	else
+		toggleButton.Text = "Physics: OFF"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(74, 114, 153) -- Sleek Red
+	end
+end
+
+local function setupTorsoMenu(character)
+	-- ALWAYS force the menu to be open/visible when respawning
+	isMenuVisible = false
+	
+	-- Clean up old setups if updating
+	if menuPart then menuPart:Destroy() end
+	
+	local torso = character:WaitForChild("UpperTorso", 0.1) or character:WaitForChild("Torso", 0.1)
+	if not torso then return end
+	
+	-- Create Client-Side Anchor Part for Flat GUI
+	menuPart = Instance.new("Part")
+	menuPart.Name = "VRPhysicsMenuPart"
+	menuPart.Transparency = 1 -- CHANGED: Start at 0 (visible) to match the open state
+	menuPart.CanCollide = false
+	menuPart.CanQuery = false
+	menuPart.CanTouch = false
+	menuPart.Massless = true
+	menuPart.Size = Vector3.new(1.6, 0.5, 0.1) 
+	menuPart.Parent = character
+	
+	-- Weld to the Torso front side
+	menuWeld = Instance.new("Weld")
+	menuWeld.Part0 = torso
+	menuWeld.Part1 = menuPart
+	menuWeld.C0 = CFrame.new(-2, 1.5, -6.1) 
+	menuWeld.Parent = menuPart
+	
+	-- Create Surface GUI
+	menuSurfaceGui = Instance.new("SurfaceGui")
+	menuSurfaceGui.Name = "VRPhysicsMenuGui"
+	menuSurfaceGui.Face = Enum.NormalId.Back 
+	menuSurfaceGui.CanvasSize = Vector2.new(400, 150) 
+	menuSurfaceGui.AlwaysOnTop = true
+	menuSurfaceGui.ResetOnSpawn = false
+	menuSurfaceGui.Adornee = menuPart
+	menuSurfaceGui.Enabled = false -- This will now always be true on spawn
+	menuSurfaceGui.Parent = playerGui
+	
+	-- The Interactive Toggle Button
+	toggleButton = Instance.new("TextButton")
+	toggleButton.Size = UDim2.new(1, 0, 1, 0)
+	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	toggleButton.Font = Enum.Font.SourceSansBold
+	toggleButton.TextSize = 33
+	toggleButton.Parent = menuSurfaceGui
+	
+	local uiCorner = Instance.new("UICorner")
+	uiCorner.CornerRadius = UDim.new(0, 16)
+	uiCorner.Parent = toggleButton
+	
+	updateButtonAppearance()
+	
+	-- Button Action Click
+	toggleButton.MouseButton1Click:Connect(function()
+		isScriptEnabled = not isScriptEnabled
+		updateButtonAppearance()
+		if not isScriptEnabled and isHolding then
+			dropHeldObject(false) 
+		end
+	end)
+end
+
+-- Monitor Character Respawns
+if player.Character then setupTorsoMenu(player.Character) end
+player.CharacterAdded:Connect(setupTorsoMenu)
+
+-- --- INITIALIZE AUDIO ---
+local function initializeSounds()
+	soundGrab1 = Instance.new("Sound")
+	soundGrab1.SoundId = SOUND_GRAB_1_ID
+	soundGrab1.Volume = VOLUME_GRAB_1
+	soundGrab1.Looped = false 
+	soundGrab1.Parent = camera
+
+	soundGrab2 = Instance.new("Sound")
+	soundGrab2.SoundId = SOUND_GRAB_2_ID
+	soundGrab2.Volume = VOLUME_GRAB_2
+	soundGrab2.Looped = true 
+	soundGrab2.Parent = camera
+
+	soundRelease = Instance.new("Sound")
+	soundRelease.SoundId = SOUND_RELEASE_ID
+	soundRelease.Volume = VOLUME_RELEASE
+	soundRelease.Looped = false
+	soundRelease.Parent = camera
+	
+	soundLaunch = Instance.new("Sound")
+	soundLaunch.SoundId = SOUND_LAUNCH_ID
+	soundLaunch.Volume = VOLUME_LAUNCH
+	soundLaunch.Looped = false
+	soundLaunch.Parent = camera
+
+	soundModeSwitch = Instance.new("Sound")
+	soundModeSwitch.SoundId = SOUND_MODE_SWITCH_ID
+	soundModeSwitch.Volume = VOLUME_MODE_SWITCH
+	soundModeSwitch.Looped = false
+	soundModeSwitch.Parent = camera
+end
+initializeSounds()
+
+-- Helper: Get Right Hand CFrame
+local function getRightHandWorldCFrame()
+	local handCFrame = VRService:GetUserCFrame(Enum.UserCFrame.RightHand)
+	return camera.CFrame * handCFrame
+end
+
+-- Create visual beam effects matching current mode color
+local function createBeam(part, hitPosition)
+	if visualBeam then visualBeam:Destroy() end
+	if handAttachment then handAttachment:Destroy() end
+	if targetAttachment then targetAttachment:Destroy() end
+	
+	handAttachment = Instance.new("Attachment")
+	handAttachment.Parent = workspace.Terrain
+	
+	targetAttachment = Instance.new("Attachment")
+	targetAttachment.Parent = part
+	targetAttachment.WorldPosition = hitPosition
+	
+	local beamColor = (currentMode == "Launch") and COLOR_LAUNCH_BEAM or COLOR_NORMAL_BEAM
+	
+	visualBeam = Instance.new("Beam")
+	visualBeam.Attachment0 = handAttachment
+	visualBeam.Attachment1 = targetAttachment
+	visualBeam.Color = ColorSequence.new(beamColor)
+	visualBeam.Width0 = 0.0125
+	visualBeam.Width1 = 0.0125
+	visualBeam.FaceCamera = true
+	visualBeam.Parent = workspace.Terrain
+end
+
+local function cleanupBeam()
+	if visualBeam then visualBeam:Destroy(); visualBeam = nil end
+	if handAttachment then handAttachment:Destroy(); handAttachment = nil end
+	if targetAttachment then targetAttachment:Destroy(); targetAttachment = nil end
+end
+
+-- Create highlight matching current mode color context
+local function applyHighlight(part)
+	if currentHighlight then currentHighlight:Destroy() end
+	
+	currentHighlight = Instance.new("Highlight")
+	
+	if currentMode == "Launch" then
+		currentHighlight.FillColor = COLOR_LAUNCH_BEAM
+		currentHighlight.FillTransparency = 0.90
+		currentHighlight.OutlineColor = Color3.fromRGB(255, 200, 150)
+		currentHighlight.OutlineTransparency = 0.4
+	else
+		currentHighlight.FillColor = COLOR_NORMAL_BEAM
+		currentHighlight.FillTransparency = 0.94
+		currentHighlight.OutlineColor = Color3.fromRGB(225, 225, 225)
+		currentHighlight.OutlineTransparency = 0.55
+	end
+	
+	local targetInstance = part:FindFirstAncestorOfClass("Model") or part
+	currentHighlight.Parent = targetInstance
+end
+
+-- Update live beam/highlight color if mode is changed while actively holding something
+local function updateActiveVisualsColors()
+	if isHolding and visualBeam and currentHighlight then
+		local beamColor = (currentMode == "Launch") and COLOR_LAUNCH_BEAM or COLOR_NORMAL_BEAM
+		visualBeam.Color = ColorSequence.new(beamColor)
+		
+		if currentMode == "Launch" then
+			currentHighlight.FillColor = COLOR_LAUNCH_BEAM
+			currentHighlight.OutlineColor = Color3.fromRGB(255, 200, 150)
+		else
+			currentHighlight.FillColor = COLOR_NORMAL_BEAM
+			currentHighlight.OutlineColor = Color3.fromRGB(225, 225, 225)
+		end
+	end
+end
+
+-- Fade out highlight (Handles special yellow flash if launching)
+local function removeHighlight(isLaunching)
+	if currentHighlight then
+		local highlightToFade = currentHighlight
+		currentHighlight = nil
+		
+		if isLaunching then
+			highlightToFade.FillColor = Color3.fromRGB(255, 255, 200)
+			highlightToFade.OutlineColor = Color3.fromRGB(255, 255, 230)
+			highlightToFade.FillTransparency = 0.1
+			highlightToFade.OutlineTransparency = 0.0
+			
+			local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+			local goal = {
+				FillTransparency = 1,
+				OutlineTransparency = 1
+			}
+			
+			local tween = TweenService:Create(highlightToFade, tweenInfo, goal)
+			tween:Play()
+			tween.Completed:Connect(function()
+				highlightToFade:Destroy()
+			end)
+		else
+			local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+			local goal = {
+				FillTransparency = 1,
+				OutlineTransparency = 1
+			}
+			
+			local tween = TweenService:Create(highlightToFade, tweenInfo, goal)
+			tween:Play()
+			tween.Completed:Connect(function()
+				highlightToFade:Destroy()
+			end)
+		end
+	end
+end
+
+-- Raycast to find targets from unlimited/massive range
+local function scanForTarget()
+	local handCF = getRightHandWorldCFrame()
+	local rayOrigin = handCF.Position
+	local rayDirection = handCF.LookVector * MAX_RAYCAST_DISTANCE
+	
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	if player.Character then
+		raycastParams.FilterDescendantsInstances = {player.Character}
+	end
+	
+	local raycastResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	
+	if raycastResult and raycastResult.Instance then
+		local hitInstance = raycastResult.Instance
+		if hitInstance:IsA("BasePart") then
+			if not hitInstance.Anchored or anchoredObjects[hitInstance] then
+				return hitInstance, raycastResult.Position
+			end
+		end
+	end
+	return nil, nil
+end
+
+-- --- DROP / RELEASE FUNCTION ---
+dropHeldObject = function(isLaunching)
+	if isHolding then
+		isHolding = false
+		targetPart = nil
+		cleanupBeam()
+		removeHighlight(isLaunching)
+		
+		if soundGrab1.IsPlaying then soundGrab1:Stop() end
+		if soundGrab2.IsPlaying then soundGrab2:Stop() end
+		
+		if isLaunching then
+			soundLaunch:Play()
+		else
+			soundRelease:Play()
+		end
+	end
+end
+
+-- --- INPUT HANDLING ---
+
+-- Left VR Thumbstick Button (ButtonL3) -> Open / Close Torso Menu View entirely
+UserInputService.InputBegan:Connect(function(input, processed)
+	if input.KeyCode == Enum.KeyCode.ButtonL3 then
+		isMenuVisible = not isMenuVisible
+		
+		-- Toggle the GUI screen visibility
+		if menuSurfaceGui then
+			menuSurfaceGui.Enabled = isMenuVisible
+		end
+		
+		-- Toggle the physical part visibility
+		if menuPart then
+			if isMenuVisible then
+				menuPart.Transparency = 0 -- Fully visible when open
+			else
+				menuPart.Transparency = 1 -- Completely invisible when closed
+			end
+		end
+	end
+end)
+
+-- 1. Grab & Release Logic (Right Trigger)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if not isScriptEnabled then return end -- Master Safeguard Check
+	
+	if input.KeyCode == Enum.KeyCode.ButtonR2 then
+		if not isHolding then
+			local part, hitPos = scanForTarget()
+			if part then
+				if anchoredObjects[part] then
+					part.Anchored = false
+					anchoredObjects[part] = nil
+				end
+				
+				targetPart = part
+				isHolding = true
+				holdDistance = (getRightHandWorldCFrame().Position - hitPos).Magnitude
+				createBeam(part, hitPos)
+				applyHighlight(part)
+				
+				soundGrab1:Play()
+				soundGrab2:Play()
+			end
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.ButtonR2 then
+		dropHeldObject(false)
+	end
+end)
+
+-- 2. Mode Toggle Logic (Button B)
+local function handleModeToggleAction(actionName, inputState, inputObject)
+	if not isScriptEnabled then return Enum.ContextActionResult.Pass end -- Master Safeguard Check
+	
+	if inputState == Enum.UserInputState.Begin then
+		if currentMode == "Normal" then
+			currentMode = "Launch"
+		else
+			currentMode = "Normal"
+		end
+		
+		-- Play the mode switch sound
+		if soundModeSwitch then
+			soundModeSwitch:Play()
+		end
+		
+		updateActiveVisualsColors()
+		return Enum.ContextActionResult.Sink
+	end
+	return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindAction("VRPhysicsGunToggleMode", handleModeToggleAction, false, Enum.KeyCode.ButtonB)
+
+-- 3. Contextual Button A Action (Anchor if Normal mode, Launch if Launch mode)
+local function handleButtonAAction(actionName, inputState, inputObject)
+	if not isScriptEnabled then return Enum.ContextActionResult.Pass end -- Master Safeguard Check
+	
+	if inputState == Enum.UserInputState.Begin then
+		if isHolding and targetPart then
+			if currentMode == "Launch" then
+				local handCF = getRightHandWorldCFrame()
+				targetPart.AssemblyLinearVelocity = handCF.LookVector * LAUNCH_FORCE
+				dropHeldObject(true)
+				return Enum.ContextActionResult.Sink
+				
+			elseif currentMode == "Normal" then
+				targetPart.Anchored = true
+				targetPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
+				targetPart.AssemblyAngularVelocity = Vector3.new(0,0,0)
+				
+				anchoredObjects[targetPart] = true
+				
+				dropHeldObject(false)
+				return Enum.ContextActionResult.Sink
+			end
+		end
+	end
+	return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindAction("VRPhysicsGunButtonA", handleButtonAAction, false, Enum.KeyCode.ButtonA)
+
+
+-- Movement tracking and joystick update loop
+RunService.RenderStepped:Connect(function(deltaTime)
+	if not isScriptEnabled then return end -- Master Safeguard Check
+	
+	local handCF = getRightHandWorldCFrame()
+	
+	if isHolding and targetPart and targetPart.Parent then
+		local thumbstickState = UserInputService:GetGamepadState(Enum.UserInputType.Gamepad1)
+		for _, state in ipairs(thumbstickState) do
+			if state.KeyCode == Enum.KeyCode.Thumbstick2 then
+				local yValue = state.Position.Y
+				if math.abs(yValue) > 0.1 then
+					holdDistance = holdDistance - (yValue * DISTANCE_CHANGE_SPEED * deltaTime)
+					holdDistance = math.clamp(holdDistance, 2, MAX_RAYCAST_DISTANCE)
+				end
+			end
+		end
+		
+		if handAttachment then
+			handAttachment.WorldPosition = handCF.Position
+			handAttachment.CFrame = handCF
+		end
+		
+		local targetPosition = handCF.Position + (handCF.LookVector * holdDistance)
+		local currentPos = targetPart.Position
+		local velocityNeeded = (targetPosition - currentPos) * TRACKING_SPEED
+		
+		targetPart.AssemblyLinearVelocity = velocityNeeded
+		targetPart.AssemblyAngularVelocity = targetPart.AssemblyAngularVelocity * 0.9
+		
+		if visualBeam and targetAttachment then
+			local lagVector = currentPos - targetPosition
+			local lagDistance = lagVector.Magnitude
+			
+			if lagDistance > 0.5 then
+				local localLag = handCF:VectorToObjectSpace(lagVector)
+				visualBeam.CurveSize0 = localLag.X * 0.5
+				visualBeam.CurveSize1 = -localLag.Y * 0.5
+			else
+				visualBeam.CurveSize0 = 0
+				visualBeam.CurveSize1 = 0
+			end
+		end
+	end
+end)
